@@ -1,0 +1,11 @@
+{
+  "event": "Veneto Gravel 2026",
+  "location": "Bassano del Grappa, Italy",
+  "date_range": "2026-04-17 to 2026-04-22",
+  "route": "Classic",
+  "distance_km": 720,
+  "elevation_m": 4300,
+  "rider": "Enrique Doubleyou",
+  "status": "planned",
+  "notes": "Placeholder data based on public event information. Replace with your own route, checkpoints, strategy and live-tracking data."
+}
