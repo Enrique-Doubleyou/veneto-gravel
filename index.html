@@ -115,6 +115,24 @@
       font-size: 2em;
       text-decoration: none;
     }
+    .lightbox-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      color: white;
+      font-size: 3em;
+      line-height: 1;
+      text-decoration: none;
+      padding: .1em .35em;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .lightbox-nav:hover { opacity: .75; }
+    .lightbox-prev { left: 8px; }
+    .lightbox-next { right: 8px; }
+    @media (max-width:480px){
+      .lightbox-nav{ font-size: 2.2em; }
+    }
 
     .abschluss {
       --bg: #ffffff;
@@ -420,9 +438,9 @@
     </div>
 
     <h2 id="galerie">📸 Bildergalerie</h2>
-    <p style="font-size:0.9em;color:var(--muted-global);margin:-.5rem 0 .5rem">Vorbereitet für Live-Bilder oder manuelle Event-Galerie</p>
+    <p style="font-size:0.9em;color:var(--muted-global);margin:-.5rem 0 .5rem">Aktualisiert alle 5 Minuten</p>
     <div id="bildergalerie" class="bildergalerie"></div>
-    <p id="noImages" style="text-align:center;color:var(--muted-global)">Noch keine Event-Bilder verfügbar.</p>
+    <p id="noImages" style="text-align:center;color:var(--muted-global);display:none">Noch keine Event-Bilder verfügbar.</p>
     <p id="timestamp" style="font-size:0.8em;color:var(--muted-global)"></p>
 
     <section class="abschluss" id="plan">
@@ -526,46 +544,116 @@
   <a class="totop-fab" href="#top" aria-label="Nach oben"><span>Nach&nbsp;oben</span></a>
 
   <script>
-    const galleryItems = [
-      { src: 'gallery1.jpg', alt: 'Veneto Gravel Galerie Bild 1', caption: 'Platzhalter für Event-Foto 1' },
-      { src: 'gallery2.jpg', alt: 'Veneto Gravel Galerie Bild 2', caption: 'Platzhalter für Event-Foto 2' },
-      { src: 'gallery3.jpg', alt: 'Veneto Gravel Galerie Bild 3', caption: 'Platzhalter für Event-Foto 3' }
-    ];
+  // === Veneto Gravel 2026 Live-Galerie (Cloudinary) ===
+  const CLOUD_NAME = 'c53b7kse';
+  const TAG = 'veneto26';
+  const LIST_URL = `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${TAG}.json?max_results=500`;
 
-    const feedGrid = document.getElementById('bildergalerie');
-    const noteNoImages = document.getElementById('noImages');
-    const noteTs = document.getElementById('timestamp');
+  function thumbUrl(it){ return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/w_360,h_270,c_fill,q_auto,f_auto/${it.public_id}.${it.format}`; }
+  function fullUrl(it){ return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/w_1600,q_auto,f_auto/${it.public_id}.${it.format}`; }
 
-    function renderGallery(items) {
-      if (!items || !items.length) {
-        noteNoImages.style.display = 'block';
-        return;
+  const feedGrid = document.getElementById("bildergalerie");
+  const noteNoImages = document.getElementById("noImages");
+  const noteTs = document.getElementById("timestamp");
+  const seen = new Set();
+  const items = []; // geladene Bilder in Anzeigereihenfolge
+
+  // Eine gemeinsame Lightbox für alle Bilder, damit Weiter/Zurück ohne Schließen geht
+  const lightbox = document.createElement("div");
+  lightbox.className = "lightbox";
+  lightbox.id = "shared-lightbox";
+  lightbox.innerHTML = `
+    <a href="#" class="lightbox-close" aria-label="Schließen">&times;</a>
+    <a href="#" class="lightbox-nav lightbox-prev" aria-label="Vorheriges Bild">&#8249;</a>
+    <img alt="Großansicht">
+    <a href="#" class="lightbox-nav lightbox-next" aria-label="Nächstes Bild">&#8250;</a>
+  `;
+  document.body.appendChild(lightbox);
+  const lbImg = lightbox.querySelector("img");
+  let currentIndex = -1;
+
+  function showAt(index){
+    if(!items.length) return;
+    currentIndex = (index + items.length) % items.length;
+    lbImg.src = fullUrl(items[currentIndex]);
+    lightbox.style.display = "flex";
+    document.body.style.overflow = "hidden";
+  }
+  function closeLightbox(){
+    lightbox.style.display = "none";
+    document.body.style.overflow = "";
+  }
+  function showNext(){ showAt(currentIndex + 1); }
+  function showPrev(){ showAt(currentIndex - 1); }
+
+  lightbox.querySelector(".lightbox-close").addEventListener("click", (ev)=>{ ev.preventDefault(); closeLightbox(); });
+  lightbox.querySelector(".lightbox-next").addEventListener("click", (ev)=>{ ev.preventDefault(); showNext(); });
+  lightbox.querySelector(".lightbox-prev").addEventListener("click", (ev)=>{ ev.preventDefault(); showPrev(); });
+  lightbox.addEventListener("click", (ev)=>{ if(ev.target === lightbox) closeLightbox(); });
+
+  document.addEventListener("keydown", (ev)=>{
+    if(lightbox.style.display !== "flex") return;
+    if(ev.key === "Escape") closeLightbox();
+    else if(ev.key === "ArrowRight") showNext();
+    else if(ev.key === "ArrowLeft") showPrev();
+  });
+
+  // Swipe: links = nächstes Bild, rechts = vorheriges Bild
+  let touchStartX = null;
+  lightbox.addEventListener("touchstart", (ev)=>{
+    if(ev.touches.length === 1) touchStartX = ev.touches[0].clientX;
+  }, {passive:true});
+  lightbox.addEventListener("touchend", (ev)=>{
+    if(touchStartX === null) return;
+    const dx = ev.changedTouches[0].clientX - touchStartX;
+    const threshold = 40;
+    if(dx > threshold) showPrev();
+    else if(dx < -threshold) showNext();
+    touchStartX = null;
+  }, {passive:true});
+
+  function addItem(it){
+    if(!it || !it.public_id || seen.has(it.public_id)) return;
+    seen.add(it.public_id);
+    items.push(it);
+    const myIndex = items.length - 1;
+
+    const wrap = document.createElement("div");
+    const link = document.createElement("a");
+    link.href = "#";
+    const img = new Image();
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.alt = "Renn-Foto Veneto Gravel 2026";
+    img.src = thumbUrl(it);
+    link.appendChild(img);
+    wrap.appendChild(link);
+    feedGrid.appendChild(wrap);
+
+    link.addEventListener("click", (ev)=>{ ev.preventDefault(); showAt(myIndex); });
+  }
+
+  async function loadGallery(){
+    try{
+      const res = await fetch(LIST_URL, {cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const data = await res.json();
+      const sorted = (data.resources||[]).slice().sort((a,b)=> new Date(a.created_at)-new Date(b.created_at));
+      sorted.forEach(addItem);
+      if(sorted.length){
+        noteTs.textContent = "Letzte Aktualisierung: " + new Date().toLocaleString("de-DE");
+        noteNoImages.style.display = "none";
+      } else {
+        noteNoImages.style.display = "block";
       }
-      noteNoImages.style.display = 'none';
-      items.forEach((it, idx) => {
-        const wrap = document.createElement('div');
-        const link = document.createElement('a');
-        const lightboxId = 'img' + (idx + 1);
-        link.href = '#' + lightboxId;
-        const img = new Image();
-        img.loading = 'lazy';
-        img.decoding = 'async';
-        img.alt = it.alt;
-        img.src = it.src;
-        link.appendChild(img);
-        wrap.appendChild(link);
-        feedGrid.appendChild(wrap);
-
-        const lb = document.createElement('div');
-        lb.className = 'lightbox';
-        lb.id = lightboxId;
-        lb.innerHTML = '<a href="#" class="lightbox-close">&times;</a><div><img src="' + it.src + '" alt="' + it.alt.replace(/"/g, '&quot;') + '">' + (it.caption ? '<div style="text-align:center;margin-top:.4rem;color:white">' + it.caption + '</div>' : '') + '</div>';
-        document.body.appendChild(lb);
-      });
-      noteTs.textContent = 'Galerie vorbereitet – ersetze die Platzhalterdateien oder binde später einen Feed an.';
+    }catch(e){
+      console.error(e);
+      noteNoImages.style.display = "block";
     }
-
-    renderGallery(galleryItems);
+  }
+  loadGallery();
+  setInterval(loadGallery, 5*60*1000);
+  document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) loadGallery(); });
   </script>
 </body>
 </html>
